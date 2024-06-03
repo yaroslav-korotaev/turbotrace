@@ -1,5 +1,5 @@
 export type TracingObject = {
-  name: string;
+  tag: string;
 };
 
 export type SpanObject = {
@@ -22,3 +22,12 @@ export type Backend = {
     maybeMsg?: string,
   ): void;
 };
+
+export function createNoopBackend(): Backend {
+  return {
+    now() { return Date.now() },
+    enter(span) {},
+    exit(span, err) {},
+    trace(origin, span, detailsOrMsg, maybeMsg) {},
+  };
+}

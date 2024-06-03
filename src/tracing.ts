@@ -3,38 +3,39 @@ import { type Backend } from './backend';
 import { Span } from './span';
 
 export type AsyncFunction<T, A extends any[], R> = (this: T, ...args: A) => Promise<R>;
+
 export type SpanCallback<T> = (span: Span) => Promise<T>;
 
 export type TracingParams = {
   storage: AsyncLocalStorage<Span>;
   backend: Backend;
-  name: string;
+  tag: string;
 };
 
 export class Tracing {
   private _storage: AsyncLocalStorage<Span>;
   private _backend: Backend;
   
-  public name: string;
+  public tag: string;
   
   constructor(params: TracingParams) {
     const {
       storage,
       backend,
-      name,
+      tag,
     } = params;
     
     this._storage = storage;
     this._backend = backend;
     
-    this.name = name;
+    this.tag = tag;
   }
   
-  public child(name: string): Tracing {
+  public child(tag: string): Tracing {
     return new Tracing({
       storage: this._storage,
       backend: this._backend,
-      name: `${this.name}.${name}`,
+      tag: `${this.tag}.${tag}`,
     });
   }
   
@@ -42,7 +43,7 @@ export class Tracing {
     const span = this._storage.getStore();
     
     if (!span) {
-      throw new Error(`tracing out of context: ${this.name}`);
+      throw new Error(`tracing out of context: ${this.tag}`);
     }
     
     return span;
@@ -55,7 +56,7 @@ export class Tracing {
       backend: this._backend,
       origin: this,
       parent: this.head(),
-      name: `${this.name}.${name}`,
+      name: `${this.tag}.${name}`,
     });
     
     span.enter();
@@ -97,12 +98,20 @@ export class Tracing {
   }
 }
 
-export function createTracing(backend: Backend): Tracing {
+export type CreateTracingParams = {
+  backend: Backend;
+};
+
+export function createTracing(params: CreateTracingParams): Tracing {
+  const {
+    backend,
+  } = params;
+  
   const storage = new AsyncLocalStorage<Span>();
   const tracing = new Tracing({
     storage,
     backend,
-    name: '',
+    tag: '',
   });
   const span = new Span({
     backend,
