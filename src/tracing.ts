@@ -1,4 +1,4 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
+import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
 import { type Backend } from './backend';
 import { Span } from './span';
 
@@ -6,41 +6,56 @@ export type AsyncFunction<T, A extends any[], R> = (this: T, ...args: A) => Prom
 
 export type SpanCallback<T> = (span: Span) => Promise<T>;
 
+export type TracingSpanOptions = {
+  root?: boolean;
+};
+
+export type TracingWrapOptions = TracingSpanOptions & {
+  bind?: boolean;
+};
+
 export type TracingParams = {
   storage: AsyncLocalStorage<Span>;
   backend: Backend;
+  root?: Span;
   tag: string;
 };
 
 export class Tracing {
-  private _storage: AsyncLocalStorage<Span>;
-  private _backend: Backend;
-  
+  public storage: AsyncLocalStorage<Span>;
+  public backend: Backend;
+  public root: Span;
   public tag: string;
   
   constructor(params: TracingParams) {
     const {
       storage,
       backend,
+      root,
       tag,
     } = params;
     
-    this._storage = storage;
-    this._backend = backend;
-    
+    this.storage = storage;
+    this.backend = backend;
+    this.root = root ?? new Span({
+      origin: this,
+      parent: null,
+      name: '',
+    });
     this.tag = tag;
   }
   
   public child(tag: string): Tracing {
     return new Tracing({
-      storage: this._storage,
-      backend: this._backend,
+      storage: this.storage,
+      backend: this.backend,
+      root: this.root,
       tag: `${this.tag}.${tag}`,
     });
   }
   
   public head(): Span {
-    const span = this._storage.getStore();
+    const span = this.storage.getStore();
     
     if (!span) {
       throw new Error(`tracing out of context: ${this.tag}`);
@@ -49,19 +64,22 @@ export class Tracing {
     return span;
   }
   
-  public async span<T>(name: string, callback: SpanCallback<T>): Promise<T> {
+  public async span<T>(
+    name: string,
+    callback: SpanCallback<T>,
+    options?: TracingSpanOptions,
+  ): Promise<T> {
     let result: T;
     
     const span = new Span({
-      backend: this._backend,
       origin: this,
-      parent: this.head(),
+      parent: (options?.root) ? this.root : this.head(),
       name: `${this.tag}.${name}`,
     });
     
     span.enter();
     
-    return await this._storage.run(span, async () => {
+    return await this.storage.run(span, async () => {
       try {
         result = await callback(span);
       } catch (err) {
@@ -79,22 +97,29 @@ export class Tracing {
   public wrap<T, A extends any[], R>(
     name: string,
     fn: AsyncFunction<T, A, R>,
+    options?: TracingWrapOptions,
   ): AsyncFunction<T, A, R> {
     const self = this;
     
-    return async function (...args) {
+    let wrapper: AsyncFunction<T, A, R> = async function (...args) {
       const them = this;
       
       return await self.span(name, async () => {
         return await fn.apply(them, args);
-      });
+      }, options);
     };
+    
+    if (options?.bind) {
+      wrapper = AsyncResource.bind<AsyncFunction<T, A, R>, T>(wrapper);
+    }
+    
+    return wrapper;
   }
   
   public trace(msg?: string): void;
   public trace(details?: object, msg?: string): void;
   public trace(detailsOrMsg?: object | string, maybeMsg?: string): void {
-    this._backend.trace(this, this.head(), detailsOrMsg, maybeMsg);
+    this.backend.trace(this, this.head(), detailsOrMsg, maybeMsg);
   }
 }
 
@@ -113,14 +138,8 @@ export function createTracing(params: CreateTracingParams): Tracing {
     backend,
     tag: '',
   });
-  const span = new Span({
-    backend,
-    origin: tracing,
-    parent: null,
-    name: '',
-  });
   
-  storage.enterWith(span);
+  storage.enterWith(tracing.root);
   
   return tracing;
 }

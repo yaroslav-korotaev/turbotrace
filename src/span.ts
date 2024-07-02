@@ -1,16 +1,12 @@
-import { type Backend } from './backend';
 import { type Tracing } from './tracing';
 
 export type SpanParams = {
-  backend: Backend;
   origin: Tracing;
   parent: Span | null;
   name: string;
 };
 
 export class Span {
-  private _backend: Backend;
-  
   public origin: Tracing;
   public parent: Span | null;
   public name: string;
@@ -20,13 +16,10 @@ export class Span {
   
   constructor(params: SpanParams) {
     const {
-      backend,
       origin,
       parent,
       name,
     } = params;
-    
-    this._backend = backend;
     
     this.origin = origin;
     this.parent = parent;
@@ -37,18 +30,18 @@ export class Span {
   }
   
   public enter(): void {
-    this.start = this._backend.now();
-    this._backend.enter(this);
+    this.start = this.origin.backend.now();
+    this.origin.backend.enter(this);
   }
   
   public exit(err?: unknown): void {
-    this.stop = this._backend.now();
-    this._backend.exit(this, err);
+    this.stop = this.origin.backend.now();
+    this.origin.backend.exit(this, err);
   }
   
   public trace(msg?: string): void;
   public trace(details?: object, msg?: string): void;
   public trace(detailsOrMsg?: object | string, maybeMsg?: string): void {
-    this._backend.trace(this.origin, this, detailsOrMsg, maybeMsg);
+    this.origin.backend.trace(this.origin, this, detailsOrMsg, maybeMsg);
   }
 }
